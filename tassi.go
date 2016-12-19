@@ -3,51 +3,96 @@ package main
 import (
 	"fmt"
 	"github.com/VojtechVitek/go-trello"
+	"github.com/olekukonko/tablewriter"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 )
 
 func main() {
 	trelloKey := os.Getenv("TRELLO_KEY")
 	trelloToken := os.Getenv("TRELLO_TOKEN")
-	trelloUser := os.Getenv("TRELLO_USER")
+	trelloBoardId := os.Getenv("TRELLO_BOARD_ID")
 
+	if trelloKey == "" || trelloToken == "" || trelloBoardId == "" {
+		log.Fatal("TRELLO_KEY, TRELLO_TOKEN, and TRELLO_BOARD_ID must be set.")
+		os.Exit(1)
+	}
+
+	// Create Trello client.
 	trello, err := trello.NewAuthClient(trelloKey, &trelloToken)
 	if err != nil {
 		log.Fatal(err)
+		os.Exit(1)
 	}
 
-	// User @trello
-	user, err := trello.Member(trelloUser)
+	// Load the required board.
+	fmt.Print("Loading board... ")
+	board, err := trello.Board(trelloBoardId)
 	if err != nil {
 		log.Fatal(err)
+		os.Exit(1)
+	} else {
+		fmt.Println("Done. Loaded", board.Name)
 	}
-	fmt.Println(user.FullName)
 
-	// @trello Boards
-	boards, err := user.Boards()
+	// Load all lists on the board.
+	fmt.Print("Loading all lists... ")
+	lists, err := board.Lists()
 	if err != nil {
 		log.Fatal(err)
+		os.Exit(1)
+	} else {
+		fmt.Println("Done. Loaded", len(lists), "lists.")
 	}
 
-	if len(boards) > 0 {
-		board := boards[0]
-		fmt.Printf("* %v (%v)\n", board.Name, board.ShortUrl)
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"List", "Number of Cards", "Total Score", "Easy (1)", "Average (2)", "Hard (3)"})
 
-		// @trello Board Lists
-		lists, err := board.Lists()
-		if err != nil {
-			log.Fatal(err)
-		}
+	var totalCards int
 
-		for _, list := range lists {
-			fmt.Println("   - ", list.Name)
+	fmt.Print("Loading cards stats")
+	for _, list := range lists {
+		row := make([]string, 6)
+		var easyCount, averageCount, hardCount int
 
-			// @trello Board List Cards
-			cards, _ := list.Cards()
-			for _, card := range cards {
-				fmt.Println("      + ", card.Name)
+		// Load all cards in list.
+		cards, _ := list.Cards()
+		fmt.Print(".")
+		totalCards += len(cards)
+
+		for _, card := range cards {
+			var score byte
+			strippedName := strings.TrimSpace(card.Name)
+
+			nameLength := len(strippedName)
+
+			if strippedName[nameLength-1] == ')' {
+				score = strippedName[nameLength-2]
+				if score == '+' {
+					score = strippedName[nameLength-3]
+				}
+
+				if score == '1' {
+					easyCount++
+				} else if score == '2' {
+					averageCount++
+				} else if score == '3' {
+					hardCount++
+				}
 			}
 		}
+
+		row[0] = list.Name
+		row[1] = strconv.Itoa(len(cards))
+		row[2] = strconv.Itoa(easyCount + averageCount*2 + hardCount*3)
+		row[3] = strconv.Itoa(easyCount)
+		row[4] = strconv.Itoa(averageCount)
+		row[5] = strconv.Itoa(hardCount)
+		table.Append(row)
 	}
+	fmt.Println(" Done. Evaluated", totalCards, "cards.")
+
+	table.Render()
 }
